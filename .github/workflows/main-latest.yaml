@@ -4,6 +4,12 @@ on:
   push:
     branches: [ 'master' ] # Run on pushes to main branch
 
+env:
+  # This image's versions, image will be tagged with the combinations (:MAJOR, :MAJOR.MINOR, :MAJOR.MINOR
+  MAJOR: "0"
+  MINOR: "0"
+  PATCH: "1"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -54,9 +60,8 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64 #,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.prep.outputs.branch_name }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
             org.opencontainers.image.description=${{ github.event.repository.description }}
@@ -65,3 +70,6 @@ jobs:
             org.opencontainers.image.created=${{ steps.prep.outputs.created }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=${{ github.event.repository.license.spdx_id }}
+          cache-from: type=gha # all-automatic Github Actions caching
+          cache-to: type=gha,mode=max
+          tags: ghcr.io/${{ github.repository }}:latest,ghcr.io/${{ github.repository }}:${{env.MAJOR}}.${{env.MINOR}}.${{env.PATCH}},ghcr.io/${{ github.repository }}:${{env.MAJOR}}.${{env.MINOR}},ghcr.io/${{ github.repository }}:${{env.MAJOR}}
