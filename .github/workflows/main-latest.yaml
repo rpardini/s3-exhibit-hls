@@ -2,7 +2,7 @@ name: main-latest
 
 on:
   push:
-    branches: [ 'main' ] # Run on pushes to main branch
+    branches: [ 'master' ] # Run on pushes to main branch
 
 jobs:
   build:
