@@ -44,15 +44,16 @@ class Controller {
 
     @GetMapping("/{firstDir}/**")
     public ResponseEntity<String> request(@PathVariable String firstDir, HttpServletRequest request) {
-        log.info("First dir: {}", firstDir);
-        log.info("Path: {}", request.getRequestURI());
+        String bucketName = s3Properties.getBucket();
+        String keyName = request.getRequestURI().substring(1); // remove first slash
+
+        log.info("First dir: '{}'", firstDir);
+        log.info("Path: '{}'", keyName);
 
         if (!s3Properties.getAllowedFirstPaths().contains(firstDir)) {
             return new ResponseEntity<>("not found", HttpStatus.NOT_FOUND);
         }
 
-        String bucketName = s3Properties.getBucket();
-        String keyName = request.getRequestURI();
         S3Presigner presigner = S3Presigner.builder().credentialsProvider(() -> AwsBasicCredentials.create(s3Properties.getAccessKey(), s3Properties.getSecretKey())).region(s3Properties.getRegion()).build();
 
         PresignedGetObjectRequest presignedGetObjectRequest = presigner.presignGetObject(GetObjectPresignRequest.builder().signatureDuration(Duration.ofMinutes(s3Properties.getDurationMinutes())).getObjectRequest(GetObjectRequest.builder().bucket(bucketName).key(keyName).build()).build());
