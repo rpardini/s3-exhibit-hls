@@ -57,8 +57,8 @@ class Controller {
     @GetMapping("/{ts}/{hash}/**")
     @SneakyThrows
     public ResponseEntity<String> request(@PathVariable long ts, @PathVariable String hash, HttpServletRequest request) {
-        String path = request.getRequestURI().substring(("/%s/%s/".formatted(ts, hash)).length());
-        String basePath = path.substring(0, new URI(path).getPath().lastIndexOf('/'));
+        String path = request.getRequestURI().substring(("/%s/%s/".formatted(ts, hash)).length()); // What's left after ts and hash
+        String basePath = path.substring(0, new URI(path).getPath().lastIndexOf('/')); // Get the base path of the request, eg. the dir name
         log.info("Request for path: '{}', ts: {}, hash: {} (basePath: {})", path, ts, hash, basePath);
 
         // Make sure TS is in the future, otherwise bail.
@@ -76,8 +76,6 @@ class Controller {
             log.warn("Request for hash that doesn't match: {}", hash);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-
-        // Get the base path of the request, eg. the dir name
 
         // Authenticated request; get the object from S3, parse it, rewrite its references, etc.
         try (var s3Client = S3Client.builder().credentialsProvider(() -> AwsBasicCredentials.create(s3Properties.getAccessKey(), s3Properties.getSecretKey())).region(s3Properties.getRegion()).build()) {
