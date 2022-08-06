@@ -4,19 +4,15 @@ on:
   push:
     branches: [ 'master' ] # Run on pushes to main branch
 
-env:
-  # This image's versions, image will be tagged with the combinations (:MAJOR, :MAJOR.MINOR, :MAJOR.MINOR
-  MAJOR: "0"
-  MINOR: "0"
-  PATCH: "2"
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # So git maven plugin finds all history there
 
       - name: Prepare
         id: prep
@@ -38,6 +34,10 @@ jobs:
 
       - name: Build with Maven
         run: mvn --batch-mode -DskipTests=true package
+
+      - name: Extract Maven project version
+        run: echo ::set-output name=version::$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
+        id: pom
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -72,4 +72,4 @@ jobs:
             org.opencontainers.image.licenses=${{ github.event.repository.license.spdx_id }}
           cache-from: type=gha # all-automatic Github Actions caching
           cache-to: type=gha,mode=max
-          tags: ghcr.io/${{ github.repository }}:latest,ghcr.io/${{ github.repository }}:${{env.MAJOR}}.${{env.MINOR}}.${{env.PATCH}},ghcr.io/${{ github.repository }}:${{env.MAJOR}}.${{env.MINOR}},ghcr.io/${{ github.repository }}:${{env.MAJOR}}
+          tags: ghcr.io/${{ github.repository }}:latest,ghcr.io/${{ github.repository }}:${{ steps.pom.outputs.version }}
