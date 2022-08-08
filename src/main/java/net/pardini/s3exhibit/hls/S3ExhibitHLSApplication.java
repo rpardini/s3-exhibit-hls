@@ -100,6 +100,7 @@ class Controller {
                 String newM3u8 = presignAllSegmentsInPlaylist(basePath, new String(responseWrapper.readAllBytes(), StandardCharsets.UTF_8), presigner, ts);
 
                 return ResponseEntity.ok()
+                        .header("Content-Disposition", "attachment; filename=playlist.m3u8")
                         .header("X-Transformer", "s3-exhibit-hls")
                         .contentType(APPLICATION_VND_APPLE_MPEGURL_MEDIATYPE)
                         .contentLength(newM3u8.length())
