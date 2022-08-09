@@ -12,11 +12,14 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.servlet.config.annotation.ContentNegotiationConfigurer;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -32,9 +35,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 @SpringBootApplication
-public class S3ExhibitHLSApplication {
+public class S3ExhibitHLSApplication implements WebMvcConfigurer {
+
     public static void main(String[] args) {
         SpringApplication.run(S3ExhibitHLSApplication.class, args);
+    }
+
+    /**
+     * Spring goes out of it's way to avoid RFD's, which add a Content-Disposition header automatically.
+     * We gotta register the m3u8 extension to something starting with "audio/" so that it doesn't.
+     */
+    @Override
+    public void configureContentNegotiation(ContentNegotiationConfigurer configurer) {
+        configurer.mediaType("m3u8", MediaType.valueOf(Controller.MEDIATYPE_AUDIO_MPEGURL));
     }
 }
 
@@ -42,8 +55,9 @@ public class S3ExhibitHLSApplication {
 @Slf4j
 class Controller {
 
-    public static final String APPLICATION_VND_APPLE_MPEGURL = "application/vnd.apple.mpegurl";
-    public static final MediaType APPLICATION_VND_APPLE_MPEGURL_MEDIATYPE = MediaType.parseMediaType(APPLICATION_VND_APPLE_MPEGURL);
+    public static final String MEDIATYPE_APPLICATION_VND_APPLE_MPEGURL = "application/vnd.apple.mpegurl";
+    public static final String MEDIATYPE_AUDIO_MPEGURL = "audio/mpegurl";
+    public static final String MEDIATYPE_BINARY_OCTET_STREAM = "binary/octet-stream";
     private final S3Properties s3Properties;
 
     public Controller(S3Properties s3Properties) {
@@ -58,8 +72,8 @@ class Controller {
     @SneakyThrows
     public ResponseEntity<String> request(@PathVariable long ts, @PathVariable String hash, HttpServletRequest request) {
         String path = request.getRequestURI().substring(("/%s/%s/".formatted(ts, hash)).length()); // What's left after ts and hash
-        String basePath = path.substring(0, new URI(path).getPath().lastIndexOf('/')); // Get the base path of the request, eg. the dir name
-        log.info("Request for path: '{}', ts: {}, hash: {} (basePath: {})", path, ts, hash, basePath);
+        log.info("Request for path: '{}', ts: {}, hash: {}", path, ts, hash);
+
 
         // Make sure TS is in the future, otherwise bail.
         if (ts < System.currentTimeMillis()) {
@@ -85,33 +99,46 @@ class Controller {
             var response = responseWrapper.response();
             log.info("S3 Response: {}", response);
 
-            // https://www.iana.org/assignments/media-types/application/vnd.apple.mpegurl
-            if (!response.contentType().equals(APPLICATION_VND_APPLE_MPEGURL)) {
-                log.warn("Request for non-HLS content: {} at path {}", response.contentType(), path);
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
-            }
-
             // Prepare the presigner.
             try (S3Presigner presigner = S3Presigner.builder()
                     .credentialsProvider(() -> AwsBasicCredentials.create(s3Properties.getAccessKey(), s3Properties.getSecretKey()))
                     .region(s3Properties.getRegion()).build()) {
 
-                // Actual work, functional style
-                String newM3u8 = presignAllSegmentsInPlaylist(basePath, new String(responseWrapper.readAllBytes(), StandardCharsets.UTF_8), presigner, ts);
-
-                return ResponseEntity.ok()
-                        .header("Content-Disposition", "attachment; filename=playlist.m3u8")
-                        .header("X-Transformer", "s3-exhibit-hls")
-                        .contentType(APPLICATION_VND_APPLE_MPEGURL_MEDIATYPE)
-                        .contentLength(newM3u8.length())
-                        .body(newM3u8);
+                if (response.contentType().equals(MEDIATYPE_APPLICATION_VND_APPLE_MPEGURL) || response.contentType().equals(MEDIATYPE_AUDIO_MPEGURL)) {
+                    log.info("Working HLS playlist rewriting for content-type: {}", response.contentType());
+                    // Get the base path of the request, eg. the dir name
+                    String newM3u8 = presignAllSegmentsInPlaylist(
+                            path.substring(0, new URI(path).getPath().lastIndexOf('/')),
+                            new String(responseWrapper.readAllBytes(), StandardCharsets.UTF_8),
+                            presigner,
+                            ts);
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.parseMediaType(MEDIATYPE_AUDIO_MPEGURL))
+                            .contentLength(newM3u8.length())
+                            .body(newM3u8);
+                } else if (response.contentType().equals(MEDIATYPE_BINARY_OCTET_STREAM)) {
+                    log.info("Got non HLS media type: {}", response.contentType());
+                    return ResponseEntity
+                            .status(HttpStatus.FOUND)
+                            .header(HttpHeaders.LOCATION,
+                                    presigner.presignGetObject(
+                                            GetObjectPresignRequest.builder()
+                                                    .signatureDuration(Duration.ofMillis(ts - System.currentTimeMillis())) // since it requires a duration, calculate it
+                                                    .getObjectRequest(GetObjectRequest.builder().bucket(s3Properties.getBucket()).key(path).build())
+                                                    .build()
+                                    ).url().toString()
+                            ).build();
+                } else {
+                    log.warn("Request for non-HLS, non-Audio content: {} at path {}", response.contentType(), path);
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+                }
             }
 
         }
 
     }
 
-    private String presignAllSegmentsInPlaylist(String basePath, String m3u8OriginalContents, S3Presigner presigner, long ts) throws PlaylistParserException {
+    private String presignAllSegmentsInPlaylist(String basePath, String m3u8OriginalContents, S3Presigner s3presigner, long timestamp) throws PlaylistParserException {
         // Parse and update playlist. Library uses Immutable types only, so we've to go around a bit.
         MediaPlaylist originalPlaylist = new MediaPlaylistParser().readPlaylist(m3u8OriginalContents);
         MediaPlaylist playList = MediaPlaylist.builder()
@@ -123,9 +150,9 @@ class Controller {
                                         MediaSegment.builder()
                                                 .from(originalMediaSegment)
                                                 .uri(
-                                                        presigner.presignGetObject(
+                                                        s3presigner.presignGetObject(
                                                                 GetObjectPresignRequest.builder()
-                                                                        .signatureDuration(Duration.ofMillis(ts - System.currentTimeMillis())) // since it requires a duration, calculate it
+                                                                        .signatureDuration(Duration.ofMillis(timestamp - System.currentTimeMillis())) // since it requires a duration, calculate it
                                                                         .getObjectRequest(
                                                                                 GetObjectRequest.builder()
                                                                                         .bucket(s3Properties.getBucket())
