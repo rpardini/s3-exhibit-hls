@@ -96,17 +96,17 @@ class Controller {
 
             // Get metadata from the object in S3 and the object types in a single request.
             var responseWrapper = s3Client.getObject(GetObjectRequest.builder().bucket(s3Properties.getBucket()).key(path).build());
-            var response = responseWrapper.response();
-            log.info("S3 Response: {}", response);
+            var s3meta = responseWrapper.response();
+            log.info("S3 Response: {}", s3meta);
 
             // Prepare the presigner.
             try (S3Presigner presigner = S3Presigner.builder()
                     .credentialsProvider(() -> AwsBasicCredentials.create(s3Properties.getAccessKey(), s3Properties.getSecretKey()))
                     .region(s3Properties.getRegion()).build()) {
 
-                if (response.contentType().equals(MEDIATYPE_APPLICATION_VND_APPLE_MPEGURL) || response.contentType().equals(MEDIATYPE_AUDIO_MPEGURL)) {
-                    log.info("Working HLS playlist rewriting for content-type: {}", response.contentType());
-                    // Get the base path of the request, eg. the dir name
+                if (s3meta.contentType().equals(MEDIATYPE_APPLICATION_VND_APPLE_MPEGURL) || s3meta.contentType().equals(MEDIATYPE_AUDIO_MPEGURL)) {
+                    log.info("Working HLS playlist rewriting for content-type: {}", s3meta.contentType());
+                    // Rewrite the HLS playlist. Use newM3u8 String, to pass length to the response.
                     String newM3u8 = presignAllSegmentsInPlaylist(
                             path.substring(0, new URI(path).getPath().lastIndexOf('/')),
                             new String(responseWrapper.readAllBytes(), StandardCharsets.UTF_8),
@@ -116,8 +116,13 @@ class Controller {
                             .contentType(MediaType.parseMediaType(MEDIATYPE_AUDIO_MPEGURL))
                             .contentLength(newM3u8.length())
                             .body(newM3u8);
-                } else if (response.contentType().equals(MEDIATYPE_BINARY_OCTET_STREAM)) {
-                    log.info("Got non HLS media type: {}", response.contentType());
+                }
+
+                responseWrapper.abort(); // after this, we're not gonna read the body, instead, we'll redirect to the presigned URL
+
+                if (s3meta.contentType().equals(MEDIATYPE_BINARY_OCTET_STREAM)) {
+
+                    log.info("Got non HLS media type: {}", s3meta.contentType());
                     return ResponseEntity
                             .status(HttpStatus.FOUND)
                             .header(HttpHeaders.LOCATION,
@@ -128,10 +133,11 @@ class Controller {
                                                     .build()
                                     ).url().toString()
                             ).build();
-                } else {
-                    log.warn("Request for non-HLS, non-Audio content: {} at path {}", response.contentType(), path);
-                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
                 }
+
+                log.warn("Request for non-HLS, non-Audio content: {} at path {}", s3meta.contentType(), path);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+
             }
 
         }
