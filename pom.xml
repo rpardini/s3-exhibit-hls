@@ -12,7 +12,7 @@
     <groupId>net.pardini</groupId>
     <artifactId>s3exhibit-hls</artifactId>
     <version>0.0.4</version>
-    <name>s3exhibit-lhs</name>
+    <name>s3exhibit-hls</name>
     <description>Given S3 creds, turns GET requests into redirects for S3-signed downloads, with special treatment for
         HLS playlists and its own crypto for auth
     </description>
