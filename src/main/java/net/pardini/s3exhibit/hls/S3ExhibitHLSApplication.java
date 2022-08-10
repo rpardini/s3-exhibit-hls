@@ -16,8 +16,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.config.annotation.ContentNegotiationConfigurer;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -68,7 +69,7 @@ class Controller {
     }
 
 
-    @GetMapping("/{ts}/{hash}/**")
+    @RequestMapping(value = "/{ts}/{hash}/**", method = {RequestMethod.GET, RequestMethod.HEAD}, produces = {MEDIATYPE_APPLICATION_VND_APPLE_MPEGURL, MEDIATYPE_AUDIO_MPEGURL, MEDIATYPE_BINARY_OCTET_STREAM})
     @SneakyThrows
     public ResponseEntity<String> request(@PathVariable long ts, @PathVariable String hash, HttpServletRequest request) {
         String path = request.getRequestURI().substring(("/%s/%s/".formatted(ts, hash)).length()); // What's left after ts and hash
@@ -113,6 +114,7 @@ class Controller {
                             presigner,
                             ts);
                     return ResponseEntity.ok()
+                            .header("Access-Control-Allow-Origin", "*") // CORS allow
                             .contentType(MediaType.parseMediaType(MEDIATYPE_AUDIO_MPEGURL))
                             .contentLength(newM3u8.length())
                             .body(newM3u8);
@@ -125,6 +127,7 @@ class Controller {
                     log.info("Got non HLS media type: {}", s3meta.contentType());
                     return ResponseEntity
                             .status(HttpStatus.FOUND)
+                            .header("Access-Control-Allow-Origin", "*") // CORS allow
                             .header(HttpHeaders.LOCATION,
                                     presigner.presignGetObject(
                                             GetObjectPresignRequest.builder()
